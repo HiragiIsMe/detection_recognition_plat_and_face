@@ -120,3 +120,62 @@ def create_table_if_not_exists():
     cursor.close()
     conn.close()
     print("[DB] Table 'entries' ready dengan status management")
+
+def create_table_if_not_exists():
+    """
+    Buat table dengan kolom status dan exit_time
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    sql = """
+    CREATE TABLE IF NOT EXISTS entries (
+        id VARCHAR(36) PRIMARY KEY,
+        plate_text VARCHAR(50),
+        plate_conf FLOAT,
+        face_vector JSON,
+        plate_image VARCHAR(500),
+        face_image VARCHAR(500),
+        entry_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        exit_time TIMESTAMP NULL,
+        status ENUM('active', 'exited') DEFAULT 'active'
+    )
+    """
+    
+    cursor.execute(sql)
+    conn.commit()
+    cursor.close()
+    conn.close()
+    print("[DB] Table 'entries' ready dengan status management")
+
+def get_vehicle():
+    """
+    Mengambil semua riwayat kendaraan (plat, waktu masuk, status)
+    untuk kebutuhan API Mobile Apps.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True) # Return hasil sebagai dictionary
+
+    sql = """
+    SELECT plate_text, entry_time, status 
+    FROM entries 
+    ORDER BY entry_time DESC
+    """
+    
+    cursor.execute(sql)
+    results = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    
+    # Kita format ulang sedikit agar datetime aman saat di-convert ke JSON
+    formatted_results = []
+    for row in results:
+        formatted_results.append({
+            "plate_text": row['plate_text'],
+            "entry_time": str(row['entry_time']), # Convert object datetime ke string
+            "status": row['status']
+        })
+        
+    print(f"[DB] Berhasil mengambil {len(formatted_results)} data riwayat")
+    return formatted_results
