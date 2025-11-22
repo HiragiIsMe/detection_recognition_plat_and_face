@@ -1,75 +1,58 @@
 # utils/sensor_simple.py
 import serial
 import time
-from utils.loading import LoadingAnimation
 
-def sensor_detect_vehicle_continuous(port='COM3'):
-    """
-    Fungsi sensor yang terus mendeteksi dengan loading animation
-    """
-    print(f"🔍 Mencoba koneksi ke {port}...")
-    
+# Global serial instance + last detect time
+ser_instance = None
+_last_detect_time = 0  
+
+
+def init_sensor(port='COM3'):
+    """Init serial hanya sekali di awal."""
+    global ser_instance
+
+    if ser_instance is None:
+        try:
+            ser_instance = serial.Serial(
+                port=port,
+                baudrate=115200,
+                timeout=0.05  # cepat dan non-blocking
+            )
+            time.sleep(2)  # tunggu arduino reset
+            ser_instance.reset_input_buffer()
+            print(f"✅ Sensor pada {port} tersambung")
+        except Exception as e:
+            print(f"❌ Gagal membuka sensor: {e}")
+            ser_instance = None
+
+
+def sensor_detect_vehicle_continuous(port='COM3', debounce_ms=1500):
+    """Non-blocking sensor check. Dipanggil berkali-kali dalam loop utama."""
+    global ser_instance, _last_detect_time
+
+    # init serial jika belum
+    if ser_instance is None:
+        init_sensor(port)
+
+    if ser_instance is None:
+        return False  # sensor tidak ada
+
+    # baca 1 line saja (non-blocking)
     try:
-        # Koneksi serial sederhana
-        ser = serial.Serial(
-            port=port,
-            baudrate=115200,
-            timeout=1
-        )
-        
-        # Tunggu Arduino reset
-        time.sleep(2)
-        
-        # Clear buffer garbage data
-        ser.reset_input_buffer()
-        
-        print(f"✅ Terkoneksi ke {port}")
-        
-        # LOADING CONTINUOUS - akan terus berjalan
-        loading = LoadingAnimation("Mendeteksi kendaraan")
-        loading.start()
-        
-        while True:  # Infinite loop
-            # Baca data serial
-            if ser.in_waiting > 0:
-                try:
-                    # Baca raw data
-                    raw_data = ser.readline()
-                    
-                    # Coba decode, skip jika error
-                    try:
-                        text = raw_data.decode('utf-8').strip()
-                    except:
-                        try:
-                            text = raw_data.decode('latin-1').strip()
-                        except:
-                            # Skip data yang tidak bisa di-decode
-                            continue
-                    
-                    # Cek jika kendaraan terdeteksi
-                    if "VEHICLE_DETECTED" in text:
-                        loading.stop("✅ Kendaraan terdeteksi!")
-                        ser.close()
-                        return True
-                            
-                except Exception as e:
-                    # Skip error decoding
-                    continue
-            
-            time.sleep(0.1)
-        
-    except Exception as e:
-        print(f"❌ Gagal koneksi ke {port}: {e}")
-        # ⚠️ JANGAN return True, biarkan program berhenti
-        return False  # ⚠️ PERBAIKAN: Return False jika gagal koneksi
+        if ser_instance.in_waiting > 0:
+            raw = ser_instance.readline()
+            try:
+                text = raw.decode('utf-8').strip()
+            except:
+                text = raw.decode('latin-1').strip()
 
-# Fungsi untuk single detection
-def sensor_detect_vehicle(port='COM3', timeout=30):
-    """
-    Fungsi sensor untuk single detection
-    """
-    return sensor_detect_vehicle_continuous(port=port)
+            if "VEHICLE_DETECTED" in text:
+                now = time.time() * 1000
+                if now - _last_detect_time > debounce_ms:
+                    _last_detect_time = now
+                    return True
 
-# Fungsi tanpa parameter untuk compatibility
-def sensor_detect_vehicle_simple():
-    return sensor_detect_vehicle(port='COM3')
+    except Exception:
+        pass
+
+    return False

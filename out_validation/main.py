@@ -292,7 +292,7 @@ def main():
     print("=" * 50)
 
     # Setup serial UNTUK SEMUA: sensor, servo & buzzer
-    if not setup_serial(port='COM3'):
+    if not setup_serial(port='COM10'):
         print("❌ Gagal koneksi serial, sistem tidak dapat berjalan")
         return
 
