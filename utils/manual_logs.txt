@@ -1,0 +1,7 @@
+2025-11-22 20:20:30.364040 - Gate dibuka manual via App
+2025-11-22 20:36:04.151847 - Gate dibuka manual via App
+2025-11-22 20:42:01.579102 - Gate dibuka manual via App
+2025-11-22 20:42:07.241389 - Gate dibuka manual via App
+2025-11-22 20:42:36.111355 - Gate dibuka manual via App
+2025-11-22 20:48:05.712982 - Gate dibuka manual via App
+2025-11-22 20:49:05.818880 - Gate dibuka manual via App

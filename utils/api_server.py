@@ -47,31 +47,43 @@ def index():
 @app.route('/api/open-gate', methods=['POST'])
 def manual_gate_control():
     try:
-        # 1. Terima request (sekadar untuk validasi token/auth jika perlu)
         data = request.json
-        action = data.get('action') # misal: "OPEN"
-        
+        action = data.get('action')
+
         print(f"MANUAL OVERRIDE RECEIVED: Action {action}")
 
-        # 2. LANGSUNG KE HARDWARE (Matikan Alarm & Buka Gate)
-        # Contoh logika kirim ke Arduino via Serial
         if action == "OPEN":
-            # Kirim kode ke Arduino, misal 'O' untuk Open, 'S' untuk Stop Alarm
-            # ser.write(b'O') 
-            print("🔌 [HARDWARE] Mengirim sinyal BUKA GATE ke Server...")
-            print("🔌 [HARDWARE] Mengirim sinyal MATIKAN BUZZER ke Server...")
-            
-            # Opsional: Catat di file text biasa (bukan DB) biar ada jejak
+            # Buat file trigger agar OUT VALIDATION membuka gate
+            # Path menuju folder out_validation
+            out_validation_dir = os.path.join(project_root, "out_validation")
+
+            # Pastikan folder benar-benar ada
+            os.makedirs(out_validation_dir, exist_ok=True)
+
+            # Path file trigger
+            trigger_path = os.path.join(out_validation_dir, "trigger_open.txt")
+
+            with open(trigger_path, "w") as f:
+                f.write("OPEN")
+
+
+            # Log
             with open("manual_logs.txt", "a") as f:
                 f.write(f"{datetime.now()} - Gate dibuka manual via App\n")
 
+            return jsonify({
+                "status": "success",
+                "message": "Gate akan dibuka (trigger dikirim)"
+            }), 200
+        
         return jsonify({
-            "status": "success", 
-            "message": "Perintah buka gate terkirim ke hardware"
-        }), 200
+            "status": "error",
+            "message": "Action tidak valid"
+        }), 400
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == '__main__':
     print(f"🚀 API Server berjalan dari: {current_dir}")
