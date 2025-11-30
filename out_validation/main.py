@@ -6,7 +6,12 @@ import numpy as np
 from ultralytics import YOLO
 import time
 import serial
+from datetime import datetime
+from sklearn.metrics.pairwise import cosine_similarity
 
+
+TRIGGER_DIR = os.path.join(os.path.dirname(__file__), "triggers")
+os.makedirs(TRIGGER_DIR, exist_ok=True)
 # === PATH HANDLING ===
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
@@ -15,40 +20,30 @@ if ROOT_DIR not in sys.path:
 from utils.setup import setup_environment
 setup_environment()
 
-# === IMPORTS ===
 from optical_character_recognition.main import load_ocr_model, run_ocr_on_plate_smooth
 from face_recog.main import process_face_recognition
 from utils.database import get_active_entry_by_plate, mark_entry_exited
-from utils.loading import LoadingAnimation
-from sklearn.metrics.pairwise import cosine_similarity
 
 # === CONFIG ===
-CROP_DIR = os.path.join(os.path.dirname(__file__), "img")
+CROP_DIR = os.path.join(os.path.dirname(__file__), "img-live")
 os.makedirs(CROP_DIR, exist_ok=True)
+
+SERIAL_PORT = "COM9"
+BAUD_RATE = 115200
 
 serial_conn = None
 
 
 # ================================ #
-#   SERIAL COMMUNICATION (CLEAN)   #
+#      SERIAL COMMUNICATION        #
 # ================================ #
 
-def setup_serial(port='COM10'):
-    """Setup serial untuk sensor, servo, dan buzzer dalam satu jalur"""
+def setup_serial(port=SERIAL_PORT):
     global serial_conn
     try:
-        if serial_conn and serial_conn.is_open:
-            serial_conn.close()
-            time.sleep(1)
-
-        serial_conn = serial.Serial(
-            port=port,
-            baudrate=115200,
-            timeout=1
-        )
+        serial_conn = serial.Serial(port, BAUD_RATE, timeout=0.1)
         time.sleep(2)
         print(f"✅ Serial ready di {port}")
-        serial_conn.reset_input_buffer()
         return True
     except Exception as e:
         print(f"❌ Serial error: {e}")
@@ -56,121 +51,25 @@ def setup_serial(port='COM10'):
 
 
 def send_serial(cmd):
-    """Kirim perintah ke Arduino"""
-    global serial_conn
-    if serial_conn and serial_conn.is_open:
-        try:
-            serial_conn.write((cmd + "\n").encode())
-            time.sleep(0.1)
-            return True
-        except:
-            return False
-    return False
-
-
-# ================================ #
-#        SENSOR DETECTION          #
-# ================================ #
-
-def wait_vehicle_detected():
-    """
-    Tunggu sensor mengirim 'VEHICLE_DETECTED' atau '1'
-    """
-    global serial_conn
-    loading = LoadingAnimation("Menunggu kendaraan")
-    loading.start()
-
     try:
-        last_data_time = time.time()
+        serial_conn.write((cmd + "\n").encode())
+    except:
+        pass
 
-        while True:
-            if serial_conn.in_waiting > 0:
-                raw = serial_conn.readline()
-
-                try:
-                    text = raw.decode().strip()
-                except:
-                    continue
-
-                if "VEHICLE_DETECTED" in text or text == "1":
-                    loading.stop("🚗 Kendaraan terdeteksi")
-                    return True
-
-                last_data_time = time.time()
-
-            # Timeout 20 detik tidak ada data sama sekali
-            if time.time() - last_data_time > 20:
-                loading.stop("❌ Tidak ada data sensor")
-                return False
-
-            time.sleep(0.1)
-
-    except Exception as e:
-        loading.stop(f"❌ Sensor error: {e}")
-        return False
 
 
 # ================================ #
-#        HARDWARE ACTIONS          #
+#         YOLO DETECTION           #
 # ================================ #
 
-def open_gate():
-    print("🔓 Membuka gate...")
-    send_serial("o")
-    time.sleep(3)
+model_det = YOLO('../model/detection.pt')
 
-
-def alarm_on():
-    print("🚨 ALARM ON")
-    send_serial("buzz")
-
-
-def alarm_off():
-    print("🔇 ALARM OFF")
-    send_serial("silent")
-
-
-# ================================ #
-#   CHECK MANUAL OPEN FROM API     #
-# ================================ #
-
-def wait_manual_decision():
-    """
-    Jika validasi gagal → tunggu keputusan admin dari aplikasi HP.
-    Aplikasi akan memanggil /api/open-gate → API menulis trigger_open.txt
-    """
-    print("\n📲 Menunggu keputusan admin...")
-
-    while True:
-        if os.path.exists("trigger_open.txt"):
-            print("⚡ Perintah manual diterima: OPEN GATE")
-
-            alarm_off()
-            open_gate()
-
-            try:
-                os.remove("trigger_open.txt")
-            except:
-                pass
-
-            print("➡️ Lanjut ke kendaraan berikutnya")
-            return True
-
-        time.sleep(1)
-
-
-# ================================ #
-#        DETECTION FUNCTIONS        #
-# ================================ #
-
-def run_detection(frame):
-    model = YOLO('../model/detection.pt')
-    results = model(frame)
-    detections = results[0]
+def detect_objects(frame):
+    results = model_det(frame)[0]
 
     crops = {"plate": [], "face": []}
 
-    for box in detections.boxes:
+    for box in results.boxes:
         cls = int(box.cls[0])
         x1, y1, x2, y2 = map(int, box.xyxy[0])
 
@@ -188,47 +87,23 @@ def run_detection(frame):
     return crops
 
 
-def compare_encoding(a, b, threshold=0.6):
-    similarity = cosine_similarity([a], [b])[0][0]
-    return similarity >= threshold, similarity
+def compare_encoding(a, b, threshold=0.5):
+    sim = cosine_similarity([a], [b])[0][0]
+    return sim >= threshold, sim
 
 
 # ================================ #
-#         MAIN PROCESSING           #
+#        MAIN VALIDATION           #
 # ================================ #
 
-def capture_frame():
-    """
-    Capture 1 frame dari kamera laptop.
-    Kamera dibuka → ambil gambar → tutup.
-    """
-    cap = cv2.VideoCapture(0)   # 0 = kamera laptop
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+def process_vehicle(frame, ocr_model):
 
-    if not cap.isOpened():
-        print("❌ Kamera tidak bisa dibuka")
-        return None
+    print("\n📸 Running detection...")
 
-    # Ambil 1 frame
-    ret, frame = cap.read()
-    cap.release()
+    crops = detect_objects(frame)
 
-    if not ret:
-        print("❌ Gagal capture frame")
-        return None
-
-    return frame
-
-def process_vehicle(ocr_model):
-    print("📷 Capture kendaraan...")
-    frame = capture_frame()
-
-    crops = run_detection(frame)
+    # -------- OCR --------
     plate_text = "UNKNOWN"
-    face_enc = None
-
-    # OCR
     if crops["plate"]:
         plate_text = run_ocr_on_plate_smooth(
             crops["plate"][0]["path"],
@@ -237,64 +112,110 @@ def process_vehicle(ocr_model):
             "../optical_character_recognition/output/detection"
         )
 
-    # FACE
+    # -------- FACE RECOG --------
+    face_enc = None
     if crops["face"]:
         face_enc = process_face_recognition(crops["face"][0]["path"])
 
-    # VALIDATION
     if plate_text == "UNKNOWN" or face_enc is None:
         print("❌ Tidak ada wajah / plat")
-        alarm_on()
+        send_serial("buzz")
         return False
 
+    # -------- DB CHECK --------
     db = get_active_entry_by_plate(plate_text)
     if not db:
-        print("❌ Plat tidak terdaftar/ sudah keluar")
-        alarm_on()
+        print("❌ Plat tidak terdaftar / sudah keluar")
+        send_serial("buzz")
         return False
 
+    # -------- FACE MATCH --------
     match, sim = compare_encoding(face_enc, db['face_vector'])
-
     if not match:
         print(f"❌ Wajah tidak cocok ({sim:.2f})")
-        alarm_on()
+        send_serial("buzz")
         return False
 
-    # SUCCESS
+    # -------- SUCCESS --------
     print("✅ Validasi berhasil")
     mark_entry_exited(db['id'])
 
-    alarm_off()
-    open_gate()
+    send_serial("silent")
+    send_serial("o")  # open gate
+    time.sleep(2)
     return True
 
 
 # ================================ #
-#               MAIN               #
+#          LIVE CAMERA             #
 # ================================ #
 
 def main():
-    print("🚗 OUT VALIDATION SERVICE\n")
+    print("🚗 OUT VALIDATION LIVE SERVICE")
+    print("=" * 60)
 
-    if not setup_serial('COM10'):
+    # --- CAMERA ---
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("❌ Kamera tidak bisa dibuka")
+        return
+    print("📷 Kamera aktif")
+
+    # --- SERIAL ---
+    if not setup_serial(SERIAL_PORT):
         return
 
+    # --- OCR MODEL ---
     ocr_model = load_ocr_model("../model/ocr.pt")
+    print("✅ OCR Model loaded")
+
+    buffer = ""
 
     while True:
-        print("\n🔄 Menunggu kendaraan...")
-        detected = wait_vehicle_detected()
-
-        if not detected:
+        # -------- LIVE VIDEO --------
+        ret, frame = cap.read()
+        if not ret:
             continue
 
-        success = process_vehicle(ocr_model)
+        cv2.imshow("LIVE CAMERA", frame)
 
-        if not success:
-            print("\n❌ VALIDASI GAGAL → Menunggu keputusan admin.")
-            wait_manual_decision()
+        # -------- LISTEN SERIAL --------
+        if serial_conn.in_waiting:
+            data = serial_conn.read().decode(errors="ignore")
 
-        time.sleep(3)
+            if data in ["\n", "\r"]:
+                line = buffer.strip()
+                buffer = ""
+
+                if line:
+                    print(f"[SERIAL] {line}")
+
+                    if line == "VEHICLE_DETECTED":
+
+                        print("🚗 Sensor: VEHICLE DETECTED")
+                        print("📸 Capturing fresh frame...")
+
+                        # ambil 3 frame terbaru agar clear
+                        fresh_frame = None
+                        for _ in range(3):
+                            ret, fresh_frame = cap.read()
+                            time.sleep(0.05)
+
+                        # jalankan proses validasi
+                        process_vehicle(fresh_frame, ocr_model)
+
+                        time.sleep(1)
+
+            else:
+                buffer += data
+
+        # -------- EXIT KEY --------
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    serial_conn.close()
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

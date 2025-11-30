@@ -6,7 +6,7 @@ from datetime import datetime
 
 # ========== CONFIG ==========
 
-SERIAL_PORT = "COM10"
+SERIAL_PORT = "COM9"
 BAUD_RATE = 115200
 
 IMG_IN_DIR = os.path.join(os.path.dirname(__file__), "img-in")

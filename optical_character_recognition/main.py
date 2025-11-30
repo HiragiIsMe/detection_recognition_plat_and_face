@@ -5,6 +5,7 @@ import uuid
 from ultralytics import YOLO
 import sys
 import time
+import numpy as np
 
 def simple_loading(message="Loading", duration=1):
     """Simple loading animation untuk OCR"""
@@ -27,7 +28,10 @@ def load_ocr_model(model_path: str):
     return model
 
 def preprocess_plate_image(img):
-    """Preprocessing: grayscale, blur, CLAHE."""
+    """Preprocessing: grayscale, blur, CLAHE dengan grid output."""
+    # Simpan gambar asli untuk grid
+    original_image = img.copy()
+    
     # 1. Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
@@ -39,7 +43,66 @@ def preprocess_plate_image(img):
     enhanced = clahe.apply(bilateral)
     
     # 4. Convert back to BGR untuk YOLO
-    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+    final_result = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+    
+    # BUAT GRID PREPROCESSING DAN SIMPAN
+    grid_image = create_ocr_preprocessing_grid(original_image, gray, bilateral, enhanced, final_result)
+    
+    # Simpan grid ke folder preprocessing
+    grid_dir = "optical_character_recognition/output/preprocess_grids"
+    os.makedirs(grid_dir, exist_ok=True)
+    
+    grid_filename = f"preproc_grid_{uuid.uuid4().hex}.jpg"
+    grid_path = os.path.join(grid_dir, grid_filename)
+    cv2.imwrite(grid_path, grid_image)
+    
+    print(f"✅ Grid preprocessing disimpan: {os.path.basename(grid_path)}")
+    
+    return final_result
+
+def create_ocr_preprocessing_grid(original, gray, bilateral, clahe, final):
+    """Membuat grid gambar dengan semua tahap preprocessing OCR"""
+    # Resize semua gambar ke ukuran yang sama (250x80 untuk konsistensi plat)
+    size = (250, 80)
+    
+    original_resized = cv2.resize(original, size)
+    gray_resized = cv2.resize(gray, size)
+    bilateral_resized = cv2.resize(bilateral, size)
+    clahe_resized = cv2.resize(clahe, size)
+    final_resized = cv2.resize(final, size)
+    
+    # Convert grayscale images to BGR untuk konsistensi tampilan
+    gray_bgr = cv2.cvtColor(gray_resized, cv2.COLOR_GRAY2BGR)
+    bilateral_bgr = cv2.cvtColor(bilateral_resized, cv2.COLOR_GRAY2BGR)
+    clahe_bgr = cv2.cvtColor(clahe_resized, cv2.COLOR_GRAY2BGR)
+    
+    # Tambahkan label/text pada setiap gambar
+    def add_label(img, text):
+        labeled_img = img.copy()
+        # Tambahkan background untuk text
+        cv2.rectangle(labeled_img, (0, 0), (250, 25), (0, 0, 0), -1)
+        # Tambahkan text
+        cv2.putText(labeled_img, text, (5, 18), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        return labeled_img
+    
+    # Label setiap gambar
+    original_labeled = add_label(original_resized, "1. Original")
+    gray_labeled = add_label(gray_bgr, "2. Grayscale")
+    bilateral_labeled = add_label(bilateral_bgr, "3. Bilateral Filter")
+    clahe_labeled = add_label(clahe_bgr, "4. CLAHE Enhanced")
+    final_labeled = add_label(final_resized, "5. Final Result")
+    
+    # Buat grid 2x3 (2 baris, 3 kolom)
+    # Baris pertama: Original, Grayscale, Bilateral Filter
+    row1 = np.hstack([original_labeled, gray_labeled, bilateral_labeled])
+    # Baris kedua: CLAHE, Final Result, Kosong
+    row2 = np.hstack([clahe_labeled, final_labeled, np.zeros_like(original_labeled)])
+    
+    # Gabungkan baris
+    grid = np.vstack([row1, row2])
+    
+    return grid
 
 def run_ocr_on_plate(crop_path: str,
                      model_ocr,
@@ -69,11 +132,11 @@ def run_ocr_on_plate(crop_path: str,
 
     print("✅ Gambar plat terbaca")
     
-    # 2. Preprocessing
+    # 2. Preprocessing (sekarang otomatis menyimpan grid)
     simple_loading("Preprocessing gambar", 1)
-    processed = preprocess_plate_image(img)
+    processed = preprocess_plate_image(img)  # Fungsi ini sekarang otomatis save grid
 
-    # Save preprocessed image
+    # Save preprocessed image untuk OCR process
     preprocess_filename = f"proc_{uuid.uuid4().hex}_{base_name}"
     preprocess_path = os.path.join(preprocess_dir, preprocess_filename)
     cv2.imwrite(preprocess_path, processed)
@@ -173,7 +236,7 @@ def run_ocr_on_plate_smooth(crop_path: str,
                            det_dir: str,
                            conf_threshold: float = 0.5):
     """
-    OCR process dengan smooth loading animation (recommended)
+    OCR process dengan smooth loading animation
     Returns: plate_string
     """
     print("\n🔤 OCR PROCESS")
@@ -195,16 +258,16 @@ def run_ocr_on_plate_smooth(crop_path: str,
         print("❌ Gagal membaca gambar plat")
         return ""
 
-    # 2. Preprocessing
+    # 2. Preprocessing (otomatis menyimpan grid)
     loading = OCRLoading("Preprocessing gambar")
     loading.start()
-    processed = preprocess_plate_image(img)
+    processed = preprocess_plate_image(img)  # Otomatis save grid di dalam fungsi
+    loading.stop("Preprocessing selesai")
 
-    # Save preprocessed image
+    # Save preprocessed image untuk OCR process
     preprocess_filename = f"proc_{uuid.uuid4().hex}_{base_name}"
     preprocess_path = os.path.join(preprocess_dir, preprocess_filename)
     cv2.imwrite(preprocess_path, processed)
-    loading.stop("Preprocessing selesai")
     
     # 3. OCR Detection
     loading = OCRLoading("Running OCR detection")

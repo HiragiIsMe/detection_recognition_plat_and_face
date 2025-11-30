@@ -49,9 +49,7 @@ def manual_gate_control():
     try:
         data = request.json
         action = data.get('action')
-
         print(f"MANUAL OVERRIDE RECEIVED: Action {action}")
-
         if action == "OPEN":
             # Buat file trigger agar OUT VALIDATION membuka gate
             # Path menuju folder out_validation
@@ -65,8 +63,6 @@ def manual_gate_control():
 
             with open(trigger_path, "w") as f:
                 f.write("OPEN")
-
-
             # Log
             with open("manual_logs.txt", "a") as f:
                 f.write(f"{datetime.now()} - Gate dibuka manual via App\n")
@@ -75,12 +71,10 @@ def manual_gate_control():
                 "status": "success",
                 "message": "Gate akan dibuka (trigger dikirim)"
             }), 200
-        
         return jsonify({
             "status": "error",
             "message": "Action tidak valid"
         }), 400
-
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
