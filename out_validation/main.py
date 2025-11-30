@@ -147,6 +147,65 @@ def process_vehicle(frame, ocr_model):
 
 
 # ================================ #
+#      MANUAL TRIGGER CHECK        #
+# ================================ #
+# (Bagian Baru Ditambahkan Di Sini)
+
+def check_manual_trigger():
+    """
+    Cek apakah API Server mengirim request lewat file text.
+    Mendukung: Buka Gate (trigger_open.txt) & Matikan Buzzer (trigger_mute.txt)
+    """
+    
+    # --- A. LOGIKA BUKA GATE ---
+    gate_files = [
+        "trigger_open.txt", 
+        "../out_validation/trigger_open.txt", 
+        "out_validation/trigger_open.txt"
+    ]
+    
+    for file_path in gate_files:
+        if os.path.exists(file_path):
+            print(f"\n⚡ [INTERRUPT] PERINTAH APP: BUKA GATE")
+            
+            # 1. Kirim perintah serial
+            send_serial("silent") # Matikan buzzer dulu
+            send_serial("o")      # Buka Gate
+            
+            # 2. Hapus file trigger
+            try:
+                os.remove(file_path)
+                print("🧹 File trigger gate dihapus.")
+            except Exception as e:
+                print(f"Error hapus file: {e}")
+            return True 
+
+    # --- B. LOGIKA MATIKAN BUZZER ---
+    buzzer_files = [
+        "trigger_mute.txt", 
+        "../out_validation/trigger_mute.txt", 
+        "out_validation/trigger_mute.txt"
+    ]
+    
+    for file_path in buzzer_files:
+        if os.path.exists(file_path):
+            print(f"\n🔕 [INTERRUPT] PERINTAH APP: MATIKAN BUZZER")
+            
+            # 1. Kirim perintah serial
+            send_serial("silent") # Matikan buzzer saja
+            
+            # 2. Hapus file trigger
+            try:
+                os.remove(file_path)
+                print("🧹 File trigger buzzer dihapus.")
+            except Exception as e:
+                print(f"Error hapus file: {e}")
+            return True
+
+    return False
+
+
+# ================================ #
 #          LIVE CAMERA             #
 # ================================ #
 
@@ -172,6 +231,9 @@ def main():
     buffer = ""
 
     while True:
+        # -------- CEK TRIGGER DARI APLIKASI (BARU) --------
+        check_manual_trigger()
+
         # -------- LIVE VIDEO --------
         ret, frame = cap.read()
         if not ret:
