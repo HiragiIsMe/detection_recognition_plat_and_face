@@ -44,34 +44,63 @@ def index():
         "server_loc": "utils/api_server.py"
     })
 
+# ==========================================
+# API 1: KHUSUS OPEN GATE
+# ==========================================
 @app.route('/api/open-gate', methods=['POST'])
-def manual_gate_control():
+def manual_open_gate():
     try:
-        # 1. Terima request (sekadar untuk validasi token/auth jika perlu)
-        data = request.json
-        action = data.get('action') # misal: "OPEN"
-        
-        print(f"MANUAL OVERRIDE RECEIVED: Action {action}")
+        # Path menuju folder out_validation
+        out_validation_dir = os.path.join(project_root, "out_validation")
+        os.makedirs(out_validation_dir, exist_ok=True)
 
-        # 2. LANGSUNG KE HARDWARE (Matikan Alarm & Buka Gate)
-        # Contoh logika kirim ke Arduino via Serial
-        if action == "OPEN":
-            # Kirim kode ke Arduino, misal 'O' untuk Open, 'S' untuk Stop Alarm
-            # ser.write(b'O') 
-            print("🔌 [HARDWARE] Mengirim sinyal BUKA GATE ke Server...")
-            print("🔌 [HARDWARE] Mengirim sinyal MATIKAN BUZZER ke Server...")
-            
-            # Opsional: Catat di file text biasa (bukan DB) biar ada jejak
-            with open("manual_logs.txt", "a") as f:
-                f.write(f"{datetime.now()} - Gate dibuka manual via App\n")
+        # 1. Buat file trigger UNTUK GATE
+        trigger_path = os.path.join(out_validation_dir, "trigger_open.txt")
+
+        with open(trigger_path, "w") as f:
+            f.write("OPEN")
+
+        # 2. Catat Log
+        with open("manual_logs.txt", "a") as f:
+            f.write(f"{datetime.now()} - Gate dibuka manual via App\n")
 
         return jsonify({
-            "status": "success", 
-            "message": "Perintah buka gate terkirim ke hardware"
+            "status": "success",
+            "message": "Perintah BUKA GATE dikirim."
         }), 200
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ==========================================
+# API 2: KHUSUS MATIKAN BUZZER
+# ==========================================
+@app.route('/api/stop-buzzer', methods=['POST'])
+def manual_stop_buzzer():
+    try:
+        # Path menuju folder out_validation
+        out_validation_dir = os.path.join(project_root, "out_validation")
+        os.makedirs(out_validation_dir, exist_ok=True)
+
+        # 1. Buat file trigger UNTUK BUZZER (Nama file beda)
+        trigger_path = os.path.join(out_validation_dir, "trigger_mute.txt")
+
+        with open(trigger_path, "w") as f:
+            f.write("MUTE")
+
+        # 2. Catat Log
+        with open("manual_logs.txt", "a") as f:
+            f.write(f"{datetime.now()} - Buzzer dimatikan manual via App\n")
+
+        return jsonify({
+            "status": "success",
+            "message": "Perintah MATIKAN BUZZER dikirim."
+        }), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == '__main__':
     print(f"🚀 API Server berjalan dari: {current_dir}")
